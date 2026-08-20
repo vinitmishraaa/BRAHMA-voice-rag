@@ -1,0 +1,37 @@
+[
+  {
+    "id": "corp_en_001",
+    "language": "english",
+    "query": "What is a corporation?",
+    "expected_query_id": "1102432",
+    "expected_content_language": "eng_Latn"
+  },
+  {
+    "id": "corp_hi_001",
+    "language": "hindi",
+    "query": "कॉरपोरेशन क्या है?",
+    "expected_query_id": "1102432",
+    "expected_content_language": "hin_Deva"
+  },
+  {
+    "id": "corp_bn_001",
+    "language": "bengali",
+    "query": "কর্পোরেশন কী?",
+    "expected_query_id": "1102432",
+    "expected_content_language": "ben_Beng"
+  },
+  {
+    "id": "corp_gu_001",
+    "language": "gujarati",
+    "query": "કોર્પોરેશન શું છે?",
+    "expected_query_id": "1102432",
+    "expected_content_language": "guj_Gujr"
+  },
+  {
+    "id": "corp_hi_en_001",
+    "language": "hinglish",
+    "query": "corporation kya hota hai?",
+    "expected_query_id": "1102432",
+    "expected_content_language": "eng_Latn"
+  }
+]
