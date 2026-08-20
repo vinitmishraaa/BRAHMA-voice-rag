@@ -1,7 +1,9 @@
+import os
 from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
+from dotenv import load_dotenv
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -12,10 +14,19 @@ from qdrant_client.models import (
     VectorParams,
 )
 
+load_dotenv()
+
 
 class QdrantStore:
     """
-    Local Qdrant vector store for BRAHMA.
+    BRAHMA Qdrant vector store.
+
+    Local development:
+        Uses local qdrant_data when QDRANT_URL is not set.
+
+    Deployment:
+        Uses Qdrant Cloud when QDRANT_URL and QDRANT_API_KEY
+        are provided through environment variables.
 
     Features:
         - 384-dimensional multilingual embeddings
@@ -34,20 +45,57 @@ class QdrantStore:
         min_score: float = 0.70,
     ) -> None:
 
-        self.storage_path = Path(storage_path)
-
-        self.storage_path.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
         self.collection_name = collection_name
         self.vector_size = vector_size
         self.min_score = min_score
 
-        self.client = QdrantClient(
-            path=str(self.storage_path)
-        )
+        qdrant_url = os.getenv("QDRANT_URL", "").strip()
+        qdrant_api_key = os.getenv(
+            "QDRANT_API_KEY",
+            "",
+        ).strip()
+
+        # =====================================================
+        # QDRANT CLOUD
+        # =====================================================
+
+        if qdrant_url:
+
+            if not qdrant_api_key:
+                raise RuntimeError(
+                    "QDRANT_URL is set but "
+                    "QDRANT_API_KEY is missing."
+                )
+
+            self.mode = "cloud"
+            self.storage_path = None
+
+            self.client = QdrantClient(
+                url=qdrant_url,
+                api_key=qdrant_api_key,
+                timeout=60,
+            )
+
+        # =====================================================
+        # LOCAL QDRANT
+        # =====================================================
+
+        else:
+
+            self.mode = "local"
+
+            self.storage_path = Path(
+                storage_path
+            )
+
+            self.storage_path.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+            self.client = QdrantClient(
+                path=str(self.storage_path)
+            )
 
         self._ensure_collection()
 
@@ -57,14 +105,12 @@ class QdrantStore:
 
     def _ensure_collection(self) -> None:
 
-        collections = self.client.get_collections()
-
-        exists = any(
-            collection.name == self.collection_name
-            for collection in collections.collections
+        exists = self.client.collection_exists(
+            self.collection_name
         )
 
         if not exists:
+
             self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(
@@ -75,14 +121,10 @@ class QdrantStore:
 
     def recreate_collection(self) -> None:
 
-        collections = self.client.get_collections()
+        if self.client.collection_exists(
+            self.collection_name
+        ):
 
-        exists = any(
-            collection.name == self.collection_name
-            for collection in collections.collections
-        )
-
-        if exists:
             self.client.delete_collection(
                 collection_name=self.collection_name
             )
@@ -176,9 +218,11 @@ class QdrantStore:
             )
 
         if points:
+
             self.client.upsert(
                 collection_name=self.collection_name,
                 points=points,
+                wait=True,
             )
 
     # =========================================================
@@ -192,19 +236,6 @@ class QdrantStore:
         content_languages: list[str] | None = None,
         min_score: float | None = None,
     ) -> list[Any]:
-        """
-        Search Qdrant and return clean, relevant results.
-
-        Steps:
-
-            1. Validate vector dimension
-            2. Apply language filter
-            3. Retrieve extra candidates
-            4. Apply similarity threshold
-            5. Remove duplicate content
-            6. Remove duplicate query_id + text
-            7. Return top `limit`
-        """
 
         if len(query_vector) != self.vector_size:
             raise ValueError(
@@ -225,6 +256,7 @@ class QdrantStore:
         query_filter = None
 
         if content_languages:
+
             query_filter = Filter(
                 must=[
                     FieldCondition(
@@ -236,8 +268,6 @@ class QdrantStore:
                 ]
             )
 
-        # Retrieve extra candidates because duplicates
-        # may occupy the first positions.
         candidate_limit = max(
             limit * 4,
             20,
@@ -263,10 +293,6 @@ class QdrantStore:
         for result in response.points:
 
             score = float(result.score)
-
-            # -------------------------------------------------
-            # SIMILARITY THRESHOLD
-            # -------------------------------------------------
 
             if score < threshold:
                 continue
@@ -297,10 +323,6 @@ class QdrantStore:
             if not text:
                 continue
 
-            # -------------------------------------------------
-            # EXACT CONTENT DUPLICATE
-            # -------------------------------------------------
-
             content_key = (
                 content_lang,
                 text,
@@ -312,10 +334,6 @@ class QdrantStore:
             seen_content.add(
                 content_key
             )
-
-            # -------------------------------------------------
-            # QUERY + CONTENT DUPLICATE
-            # -------------------------------------------------
 
             query_text_key = (
                 query_id,
@@ -343,4 +361,5 @@ class QdrantStore:
     # =========================================================
 
     def close(self) -> None:
+
         self.client.close()
